@@ -1,5 +1,4 @@
 [workspace]
-
 members = [
     "bin/node",
     "bin/runtime",
@@ -7,7 +6,9 @@ members = [
     "pallet",
     "primitives",
 ]
-
 exclude = [
   "flooder"
 ]
+
+[profile.release]
+panic = 'unwind'
