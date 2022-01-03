@@ -1,15 +1,26 @@
-use crate::{crypto::Signature, NodeIndex, SessionId};
+use crate::{crypto::Signature, new_network::Data, NodeIndex, SessionId};
 use codec::{Decode, Encode};
 use sc_network::Multiaddr as ScMultiaddr;
 use std::convert::TryFrom;
 
 mod addresses;
+mod connections;
+mod discovery;
+mod service;
 mod session;
+#[cfg(test)]
+mod testing;
 
-use addresses::{get_common_peer_id, is_p2p};
+use addresses::{get_common_peer_id, get_peer_id, is_p2p};
+
+use connections::Connections;
+use discovery::{Discovery, DiscoveryMessage};
+use session::{Handler as SessionHandler, HandlerError as SessionHandlerError};
+
+pub use service::SessionCommand;
 
 /// A wrapper for the Substrate multiaddress to allow encoding & decoding.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Multiaddr(pub(crate) ScMultiaddr);
 
 impl From<ScMultiaddr> for Multiaddr {
@@ -35,15 +46,36 @@ impl Decode for Multiaddr {
 
 /// Data validators use to authenticate themselves for a single session
 /// and disseminate their addresses.
-#[derive(Clone, Debug, Encode, Decode)]
+#[derive(Clone, Debug, PartialEq, Encode, Decode)]
 pub struct AuthData {
     addresses: Vec<Multiaddr>,
     node_id: NodeIndex,
     session_id: SessionId,
 }
 
+impl AuthData {
+    pub fn session(&self) -> SessionId {
+        self.session_id
+    }
+
+    pub fn creator(&self) -> NodeIndex {
+        self.node_id
+    }
+
+    pub fn addresses(&self) -> Vec<Multiaddr> {
+        self.addresses.clone()
+    }
+}
+
 /// A full authentication, consisting of a signed AuthData.
 pub type Authentication = (AuthData, Signature);
+
+/// The data that should be sent to the network service.
+#[derive(Clone, Debug, PartialEq, Encode, Decode)]
+pub enum NetworkData<D: Data> {
+    Meta(DiscoveryMessage),
+    Data(D, SessionId),
+}
 
 #[cfg(test)]
 mod test {

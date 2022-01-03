@@ -1,15 +1,29 @@
 // Everything here is dead code, but I don't want to create one enormous PR.
 #![allow(dead_code)]
-use codec::{Decode, Encode};
+use aleph_bft::Recipient;
+use codec::{Codec, Decode, Encode};
 use futures::stream::Stream;
 use sc_network::{Event, Multiaddr, NotificationSender, PeerId as ScPeerId};
 use sp_api::NumberFor;
 use sp_runtime::traits::Block;
 use std::{borrow::Cow, collections::HashSet, pin::Pin};
 
-mod connection_manager;
+mod aleph;
+mod component;
+mod manager;
+mod rmc;
 mod service;
+mod session;
+mod split;
 mod substrate;
+
+use component::{
+    Network as ComponentNetwork, Receiver as ReceiverComponent, Sender as SenderComponent,
+};
+use manager::SessionCommand;
+
+pub use aleph::NetworkData as AlephNetworkData;
+pub use rmc::NetworkData as RmcNetworkData;
 
 #[derive(PartialEq, Eq, Copy, Clone, Debug, Hash)]
 pub struct PeerId(pub(crate) ScPeerId);
@@ -44,19 +58,23 @@ impl Decode for PeerId {
 /// Name of the network protocol used by Aleph Zero. This is how messages
 /// are subscribed to ensure that we are gossiping and communicating with our
 /// own network.
-pub(crate) const ALEPH_PROTOCOL_NAME: &str = "/cardinals/aleph/2";
+const ALEPH_PROTOCOL_NAME: &str = "/cardinals/aleph/2";
 
 /// Name of the network protocol used by Aleph Zero validators. Similar to
 /// ALEPH_PROTOCOL_NAME, but only used by validators that authenticated to each other.
-pub(crate) const ALEPH_VALIDATOR_PROTOCOL_NAME: &str = "/cardinals/aleph_validator/1";
+const ALEPH_VALIDATOR_PROTOCOL_NAME: &str = "/cardinals/aleph_validator/1";
 
-enum Protocol {
+/// The Generic protocol is used for validator discovery.
+/// The Validator protocol is used for validator-specific messages, i.e. ones needed for
+/// finalization.
+#[derive(Debug, PartialEq, Clone)]
+pub enum Protocol {
     Generic,
     Validator,
 }
 
 impl Protocol {
-    fn name(&self) -> Cow<'static, str> {
+    pub fn name(&self) -> Cow<'static, str> {
         use Protocol::*;
         match self {
             Generic => Cow::Borrowed(ALEPH_PROTOCOL_NAME),
@@ -85,7 +103,10 @@ pub trait Network: Clone + Send + Sync + 'static {
 
     /// Remove peers from one of the reserved sets.
     fn remove_reserved(&self, peers: HashSet<PeerId>, protocol: Cow<'static, str>);
+}
 
+/// Abstraction for requesting own network addresses and PeerId.
+pub trait NetworkIdentity {
     /// The external identity of this node, consisting of addresses and the PeerId.
     fn identity(&self) -> (Vec<Multiaddr>, PeerId);
 }
@@ -99,12 +120,38 @@ pub trait RequestBlocks<B: Block>: Clone + Send + Sync + 'static {
     fn request_stale_block(&self, hash: B::Hash, number: NumberFor<B>);
 }
 
-enum DataCommand {
+/// What do do with a specific piece of data.
+/// Note that broadcast does not specify the protocol, as we only broadcast Generic messages in this sense.
+#[derive(Debug, PartialEq, Clone)]
+pub enum DataCommand {
     Broadcast,
     SendTo(PeerId, Protocol),
 }
 
-enum ConnectionCommand {
+/// Commands for manipulating the reserved peers set.
+#[derive(Debug, PartialEq)]
+pub enum ConnectionCommand {
     AddReserved(HashSet<Multiaddr>),
     DelReserved(HashSet<PeerId>),
 }
+
+/// Returned when something went wrong when sending data using a DataNetwork.
+pub enum SendError {
+    SendFailed,
+}
+
+/// What the data sent using the network has to satisfy.
+pub trait Data: Clone + Codec + Send + Sync {}
+
+impl<D: Clone + Codec + Send + Sync> Data for D {}
+
+/// A generic interface for sending and receiving data.
+#[async_trait::async_trait]
+pub trait DataNetwork<D: Data>: Send + Sync {
+    fn send(&self, data: D, recipient: Recipient) -> Result<(), SendError>;
+    async fn next(&mut self) -> Option<D>;
+}
+
+// This should be removed after compatibility with the old network is no longer needed.
+mod compatibility;
+pub use compatibility::*;

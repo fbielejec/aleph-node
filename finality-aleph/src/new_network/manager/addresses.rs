@@ -1,4 +1,4 @@
-use crate::new_network::{connection_manager::Multiaddr, PeerId};
+use crate::new_network::{manager::Multiaddr, PeerId};
 use ip_network::IpNetwork;
 use sc_network::{multiaddr::Protocol, PeerId as ScPeerId};
 
@@ -82,7 +82,7 @@ fn peer_id(protocol: &Protocol<'_>) -> Option<PeerId> {
 }
 
 /// Returns the peer id associated with this multiaddress if it exists and is unique.
-fn get_peer_id(address: &Multiaddr) -> Option<PeerId> {
+pub fn get_peer_id(address: &Multiaddr) -> Option<PeerId> {
     address
         .0
         .iter()
@@ -106,11 +106,7 @@ pub fn get_common_peer_id(addresses: &[Multiaddr]) -> Option<PeerId> {
 #[cfg(test)]
 mod tests {
     use super::{get_common_peer_id, is_global, is_p2p};
-    use sc_network::Multiaddr as ScMultiaddr;
-
-    fn address(text: &str) -> ScMultiaddr {
-        text.parse().unwrap()
-    }
+    use crate::new_network::manager::testing::address;
 
     #[test]
     fn local_addresses_are_not_global() {
